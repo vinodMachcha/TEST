@@ -1,0 +1,25 @@
+public class TestCustomHttpClient {
+
+    public static void main(String[] args) {
+        try {
+            // Initial request (GET)
+            CustomSSLHttpClient.HttpResponse response = CustomSSLHttpClient.sendRequest("GET", "https://example.com/api/data", null);
+            
+            // Output response body and headers
+            System.out.println("Response Body: " + response.getResponseBody());
+            System.out.println("Response Headers: " + response.getResponseHeaders());
+
+            // Refresh SSL context
+            CustomSSLHttpClient.clearSSLContext();
+
+            // Another request after clearing SSL context
+            CustomSSLHttpClient.HttpResponse responseAfterClear = CustomSSLHttpClient.sendRequest("GET", "https://example.com/api/data", null);
+            
+            System.out.println("Response Body after SSL Context Reset: " + responseAfterClear.getResponseBody());
+            System.out.println("Response Headers after SSL Context Reset: " + responseAfterClear.getResponseHeaders());
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+}
