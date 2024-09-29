@@ -1,0 +1,67 @@
+import javax.net.ssl.*;
+import java.io.*;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.security.KeyStore;
+
+public class CustomSSLHttpClient {
+
+    // Singleton SSLContext to initialize once
+    private static SSLContext sslContext;
+
+    // Method to get the singleton SSL context, initialize if not already created
+    public static SSLContext getSSLContext(String keyStorePath, String keyStorePassword) throws Exception {
+        if (sslContext == null) {
+            synchronized (CustomSSLHttpClient.class) {
+                if (sslContext == null) {
+                    // Load the keystore containing the client certificate
+                    KeyStore keyStore = KeyStore.getInstance("JKS");
+                    try (FileInputStream keyStoreInput = new FileInputStream(keyStorePath)) {
+                        keyStore.load(keyStoreInput, keyStorePassword.toCharArray());
+                    }
+
+                    // Create a TrustManager that trusts the certificates in the keystore
+                    TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+                    tmf.init(keyStore);
+
+                    // Create the SSL context with the custom TrustManager
+                    sslContext = SSLContext.getInstance("TLS");
+                    sslContext.init(null, tmf.getTrustManagers(), new java.security.SecureRandom());
+                }
+            }
+        }
+        return sslContext;
+    }
+
+    // Method to make an HTTP request with dynamic method, URL, and request body
+    public static String makeHttpRequest(String method, String urlString, String requestBody, String keyStorePath, String keyStorePassword) throws Exception {
+        SSLContext sslContext = getSSLContext(keyStorePath, keyStorePassword);
+
+        URL url = new URL(urlString);
+        HttpsURLConnection connection = (HttpsURLConnection) url.openConnection();
+
+        // Set the custom SSL context for the connection
+        connection.setSSLSocketFactory(sslContext.getSocketFactory());
+        connection.setRequestMethod(method);
+
+        // If request body is present (for POST/PUT), write it to the output stream
+        if (method.equalsIgnoreCase("POST") || method.equalsIgnoreCase("PUT")) {
+            connection.setDoOutput(true);
+            try (OutputStream os = connection.getOutputStream()) {
+                byte[] input = requestBody.getBytes(StandardCharsets.UTF_8);
+                os.write(input, 0, input.length);
+            }
+        }
+
+        // Reading response
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()))) {
+            StringBuilder response = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                response.append(line);
+            }
+            return response.toString();
+        }
+    }
+}
