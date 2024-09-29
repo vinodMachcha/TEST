@@ -1,0 +1,15 @@
+// Import the custom Java class
+import com.yourpackage.CustomSSLHttpClient;
+
+String keyStorePath = "path_to_keystore.jks";  // Path to your keystore
+String keyStorePassword = "password";          // Keystore password
+
+String method = tw.local.httpMethod;           // HTTP method (GET, POST, PUT)
+String url = tw.local.httpUrl;                 // Target URL
+String requestBody = tw.local.requestBody;     // Request body (for POST/PUT)
+
+// Make the dynamic HTTP request using the custom SSL context
+String response = CustomSSLHttpClient.makeHttpRequest(method, url, requestBody, keyStorePath, keyStorePassword);
+
+// Store the response in a process variable
+tw.local.httpResponse = response;
