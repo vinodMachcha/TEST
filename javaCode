@@ -1,67 +1,102 @@
+package com.ibm.baw.custom.ssl;
+
 import javax.net.ssl.*;
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 public class CustomSSLHttpClient {
 
-    // Singleton SSLContext to initialize once
-    private static SSLContext sslContext;
+    private static SSLContext sslContext = null;
 
-    // Method to get the singleton SSL context, initialize if not already created
-    public static SSLContext getSSLContext(String keyStorePath, String keyStorePassword) throws Exception {
+    // Custom response class to hold both body and headers
+    public static class HttpResponse {
+        private String responseBody;
+        private Map<String, List<String>> responseHeaders;
+
+        public HttpResponse(String responseBody, Map<String, List<String>> responseHeaders) {
+            this.responseBody = responseBody;
+            this.responseHeaders = responseHeaders;
+        }
+
+        public String getResponseBody() {
+            return responseBody;
+        }
+
+        public Map<String, List<String>> getResponseHeaders() {
+            return responseHeaders;
+        }
+    }
+
+    // Load or refresh SSL context
+    private static SSLContext getSSLContext() throws Exception {
         if (sslContext == null) {
-            synchronized (CustomSSLHttpClient.class) {
-                if (sslContext == null) {
-                    // Load the keystore containing the client certificate
-                    KeyStore keyStore = KeyStore.getInstance("JKS");
-                    try (FileInputStream keyStoreInput = new FileInputStream(keyStorePath)) {
-                        keyStore.load(keyStoreInput, keyStorePassword.toCharArray());
-                    }
-
-                    // Create a TrustManager that trusts the certificates in the keystore
-                    TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
-                    tmf.init(keyStore);
-
-                    // Create the SSL context with the custom TrustManager
-                    sslContext = SSLContext.getInstance("TLS");
-                    sslContext.init(null, tmf.getTrustManagers(), new java.security.SecureRandom());
-                }
+            // Set up the KeyStore
+            KeyStore keyStore = KeyStore.getInstance("JKS");
+            try (var keyStoreStream = CustomSSLHttpClient.class.getResourceAsStream("/path/to/keystore.jks")) {
+                keyStore.load(keyStoreStream, "keystorePassword".toCharArray());
             }
+
+            // Initialize TrustManager with the KeyStore
+            TrustManagerFactory trustManagerFactory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+            trustManagerFactory.init(keyStore);
+
+            // Create SSL context with KeyStore and TrustManager
+            sslContext = SSLContext.getInstance("TLS");
+            sslContext.init(null, trustManagerFactory.getTrustManagers(), new java.security.SecureRandom());
         }
         return sslContext;
     }
 
-    // Method to make an HTTP request with dynamic method, URL, and request body
-    public static String makeHttpRequest(String method, String urlString, String requestBody, String keyStorePath, String keyStorePassword) throws Exception {
-        SSLContext sslContext = getSSLContext(keyStorePath, keyStorePassword);
+    // Method to clear the SSL context so that the next request recreates it
+    public static void clearSSLContext() {
+        sslContext = null;
+    }
 
-        URL url = new URL(urlString);
-        HttpsURLConnection connection = (HttpsURLConnection) url.openConnection();
+    // Method to perform HTTP requests with custom SSL context
+    public static HttpResponse sendRequest(String method, String url, String requestBody) throws Exception {
+        SSLContext sslContext = getSSLContext();
 
-        // Set the custom SSL context for the connection
+        // Open a connection to the provided URL
+        URL requestUrl = new URL(url);
+        HttpsURLConnection connection = (HttpsURLConnection) requestUrl.openConnection();
+
+        // Set custom SSL context for secure connection
         connection.setSSLSocketFactory(sslContext.getSocketFactory());
         connection.setRequestMethod(method);
 
-        // If request body is present (for POST/PUT), write it to the output stream
-        if (method.equalsIgnoreCase("POST") || method.equalsIgnoreCase("PUT")) {
+        // If requestBody is not null, we are doing a POST/PUT request
+        if (requestBody != null && (method.equals("POST") || method.equals("PUT"))) {
             connection.setDoOutput(true);
-            try (OutputStream os = connection.getOutputStream()) {
-                byte[] input = requestBody.getBytes(StandardCharsets.UTF_8);
-                os.write(input, 0, input.length);
+            try (var outputStream = connection.getOutputStream()) {
+                outputStream.write(requestBody.getBytes("UTF-8"));
+                outputStream.flush();
             }
         }
 
-        // Reading response
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()))) {
-            StringBuilder response = new StringBuilder();
-            String line;
-            while ((line = reader.readLine()) != null) {
-                response.append(line);
-            }
-            return response.toString();
+        // Read response from server
+        BufferedReader reader;
+        if (connection.getResponseCode() >= 200 && connection.getResponseCode() < 300) {
+            reader = new BufferedReader(new InputStreamReader(connection.getInputStream()));
+        } else {
+            reader = new BufferedReader(new InputStreamReader(connection.getErrorStream()));
         }
+        StringBuilder responseBody = new StringBuilder();
+        String line;
+        while ((line = reader.readLine()) != null) {
+            responseBody.append(line);
+        }
+        reader.close();
+
+        // Capture response headers
+        Map<String, List<String>> responseHeaders = new HashMap<>(connection.getHeaderFields());
+
+        // Return both body and headers in the custom HttpResponse object
+        return new HttpResponse(responseBody.toString(), responseHeaders);
     }
 }
